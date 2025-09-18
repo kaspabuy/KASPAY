@@ -247,17 +247,17 @@ with tab2:
                             order['payment_address']
                         )
                         st.session_state.payment_orders[order_id]['status'] = status
-                        st.experimental_rerun()
+                        st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
                 
                 with col2:
                     if order['status'] == 'pending' and datetime.now() > order['expires_at']:
                         st.session_state.payment_orders[order_id]['status'] = 'expired'
-                        st.experimental_rerun()
+                        st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
                 
                 with col3:
                     if st.button(f"删除订单", key=f"delete_{order_id}"):
                         del st.session_state.payment_orders[order_id]
-                        st.experimental_rerun()
+                        st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
     else:
         st.info("暂无支付订单")
 
@@ -322,4 +322,4 @@ st.markdown("""
 # 自动刷新功能（如果启用）
 if 'auto_refresh' in locals() and auto_refresh:
     time.sleep(refresh_interval)
-    st.experimental_rerun()
+    st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
