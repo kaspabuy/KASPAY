@@ -51,7 +51,7 @@ class MultiCryptoPaymentSystem:
                 'symbol': 'KAS',
                 'icon': '💎',
                 'api_base': "https://api.kaspa.org",
-                'merchant_address': "kaspa:qz8z7g3q4x5w6v7u8t9s0r1q2p3o4n5m6l7k8j9h0g1f2e3d4c5b6a7",
+                'merchant_address': "kaspa:qr3qwvf9d5qk8c7ks6g8502zr7u7pt6k9rtfrq768rc0wmf937uxj8nrgy9l5",
                 'uri_prefix': 'kaspa:',
                 'coingecko_id': 'kaspa',
                 'decimals': 8
