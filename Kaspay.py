@@ -5,9 +5,23 @@ import time
 import hashlib
 import uuid
 from datetime import datetime, timedelta
-import qrcode
 from io import BytesIO
 import base64
+
+# 尝试导入qrcode，如果失败则提供替代方案
+try:
+    import qrcode
+    QR_AVAILABLE = True
+except ImportError:
+    QR_AVAILABLE = False
+    st.warning("⚠️ qrcode库未安装。请运行: pip install qrcode[pil] 来启用二维码功能")
+
+# 尝试导入PIL，如果失败则提供提示
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 # 页面配置
 st.set_page_config(
@@ -69,23 +83,37 @@ class KaspaPaymentSystem:
     
     def generate_qr_code(self, address, amount, message=""):
         """生成Kaspa支付二维码"""
+        if not QR_AVAILABLE:
+            return None
+            
         # Kaspa URI格式
         kaspa_uri = f"kaspa:{address}?amount={amount}"
         if message:
             kaspa_uri += f"&message={message}"
             
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(kaspa_uri)
-        qr.make(fit=True)
-        
-        img = qr.make_image(fill_color="black", back_color="white")
-        
-        # 转换为base64
-        buffer = BytesIO()
-        img.save(buffer, format='PNG')
-        img_str = base64.b64encode(buffer.getvalue()).decode()
-        
-        return img_str
+        try:
+            qr = qrcode.QRCode(version=1, box_size=10, border=5)
+            qr.add_data(kaspa_uri)
+            qr.make(fit=True)
+            
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # 转换为base64
+            buffer = BytesIO()
+            img.save(buffer, format='PNG')
+            img_str = base64.b64encode(buffer.getvalue()).decode()
+            
+            return img_str
+        except Exception as e:
+            st.error(f"生成二维码失败: {e}")
+            return None
+    
+    def get_kaspa_uri(self, address, amount, message=""):
+        """获取Kaspa支付URI"""
+        kaspa_uri = f"kaspa:{address}?amount={amount}"
+        if message:
+            kaspa_uri += f"&message={message}"
+        return kaspa_uri
     
     def check_payment_status(self, order_id, expected_amount, address):
         """检查支付状态"""
@@ -185,13 +213,29 @@ with tab2:
                         st.success("地址已复制到剪贴板!")
                 
                 with col3:
-                    st.write("**支付二维码**")
-                    qr_code = payment_system.generate_qr_code(
+                    st.write("**支付信息**")
+                    
+                    # 显示Kaspa URI
+                    kaspa_uri = payment_system.get_kaspa_uri(
                         order['payment_address'],
                         order['kaspa_amount'],
                         order['description']
                     )
-                    st.image(f"data:image/png;base64,{qr_code}", width=200)
+                    st.code(kaspa_uri, language=None)
+                    
+                    # 显示二维码（如果可用）
+                    if QR_AVAILABLE:
+                        qr_code = payment_system.generate_qr_code(
+                            order['payment_address'],
+                            order['kaspa_amount'],
+                            order['description']
+                        )
+                        if qr_code:
+                            st.image(f"data:image/png;base64,{qr_code}", width=200)
+                    else:
+                        st.info("安装 qrcode[pil] 库以显示二维码")
+                        if st.button(f"复制支付URI", key=f"copy_uri_{order_id}"):
+                            st.success("URI已显示在上方，请手动复制")
                 
                 # 支付状态检查
                 col1, col2, col3 = st.columns(3)
