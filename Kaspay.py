@@ -35,6 +35,8 @@ if 'payment_orders' not in st.session_state:
     st.session_state.payment_orders = {}
 if 'kaspa_price' not in st.session_state:
     st.session_state.kaspa_price = 0.15  # 默认价格，实际应该从API获取
+if 'auto_refresh_enabled' not in st.session_state:
+    st.session_state.auto_refresh_enabled = False
 
 class KaspaPaymentSystem:
     def __init__(self):
@@ -153,6 +155,10 @@ with st.sidebar:
     st.header("商户信息")
     st.text(f"收款地址:")
     st.code(payment_system.merchant_address[:20] + "...")
+    
+    # 添加手动刷新按钮
+    if st.button("🔄 刷新页面", type="secondary"):
+        st.rerun()
 
 # 主要功能选项卡
 tab1, tab2, tab3 = st.tabs(["💳 创建支付", "📊 订单管理", "⚙️ 设置"])
@@ -180,6 +186,8 @@ with tab1:
             order = payment_system.create_payment_order(amount_usd, description)
             st.session_state.payment_orders[order['id']] = order
             st.success(f"支付订单已创建! 订单ID: {order['id'][:8]}...")
+            # 切换到订单管理页面
+            st.info("订单已创建，请切换到 '📊 订单管理' 选项卡查看详情")
     
     with col2:
         st.subheader("实时汇率")
@@ -192,9 +200,48 @@ with tab1:
 with tab2:
     st.header("支付订单管理")
     
+    # 添加批量操作按钮
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🔄 检查所有订单状态"):
+            for order_id in st.session_state.payment_orders:
+                order = st.session_state.payment_orders[order_id]
+                if order['status'] == 'pending':
+                    # 检查是否过期
+                    if datetime.now() > order['expires_at']:
+                        st.session_state.payment_orders[order_id]['status'] = 'expired'
+            st.rerun()
+    
+    with col2:
+        if st.button("🗑️ 清除已过期订单"):
+            expired_orders = [
+                order_id for order_id, order in st.session_state.payment_orders.items()
+                if order['status'] == 'expired'
+            ]
+            for order_id in expired_orders:
+                del st.session_state.payment_orders[order_id]
+            if expired_orders:
+                st.success(f"已清除 {len(expired_orders)} 个过期订单")
+                st.rerun()
+            else:
+                st.info("没有过期订单需要清除")
+    
     if st.session_state.payment_orders:
         for order_id, order in st.session_state.payment_orders.items():
-            with st.expander(f"订单 {order_id[:8]} - {order['status'].upper()}", expanded=False):
+            # 自动检查过期状态
+            if order['status'] == 'pending' and datetime.now() > order['expires_at']:
+                st.session_state.payment_orders[order_id]['status'] = 'expired'
+                order['status'] = 'expired'
+            
+            # 根据状态设置展开器的图标
+            status_icon = {
+                'pending': '⏳',
+                'confirmed': '✅',
+                'expired': '❌',
+                'failed': '❌'
+            }.get(order['status'], '❓')
+            
+            with st.expander(f"{status_icon} 订单 {order_id[:8]} - {order['status'].upper()}", expanded=False):
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -204,13 +251,27 @@ with tab2:
                     st.write(f"状态: {order['status']}")
                     st.write(f"创建时间: {order['created_at'].strftime('%Y-%m-%d %H:%M:%S')}")
                     st.write(f"过期时间: {order['expires_at'].strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    # 显示倒计时
+                    if order['status'] == 'pending':
+                        time_left = order['expires_at'] - datetime.now()
+                        if time_left.total_seconds() > 0:
+                            minutes_left = int(time_left.total_seconds() / 60)
+                            st.write(f"⏰ 剩余时间: {minutes_left} 分钟")
+                        else:
+                            st.write("⏰ 已过期")
                 
                 with col2:
                     st.write("**支付地址**")
                     st.code(order['payment_address'])
                     
-                    if st.button(f"复制地址", key=f"copy_{order_id}"):
-                        st.success("地址已复制到剪贴板!")
+                    # 使用文本框让用户手动复制
+                    st.text_input(
+                        "复制地址:",
+                        value=order['payment_address'],
+                        key=f"addr_copy_{order_id}",
+                        label_visibility="collapsed"
+                    )
                 
                 with col3:
                     st.write("**支付信息**")
@@ -234,32 +295,43 @@ with tab2:
                             st.image(f"data:image/png;base64,{qr_code}", width=200)
                     else:
                         st.info("安装 qrcode[pil] 库以显示二维码")
-                        if st.button(f"复制支付URI", key=f"copy_uri_{order_id}"):
-                            st.success("URI已显示在上方，请手动复制")
+                        # 提供URI复制框
+                        st.text_input(
+                            "复制支付URI:",
+                            value=kaspa_uri,
+                            key=f"uri_copy_{order_id}",
+                            label_visibility="collapsed"
+                        )
                 
                 # 支付状态检查
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.button(f"检查支付状态", key=f"check_{order_id}"):
-                        status = payment_system.check_payment_status(
-                            order_id, 
-                            order['kaspa_amount'], 
-                            order['payment_address']
-                        )
-                        st.session_state.payment_orders[order_id]['status'] = status
-                        st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
+                    if st.button(f"🔍 检查支付状态", key=f"check_{order_id}"):
+                        with st.spinner("检查中..."):
+                            status = payment_system.check_payment_status(
+                                order_id, 
+                                order['kaspa_amount'], 
+                                order['payment_address']
+                            )
+                            st.session_state.payment_orders[order_id]['status'] = status
+                            st.success(f"状态已更新: {status}")
+                            st.rerun()
                 
                 with col2:
-                    if order['status'] == 'pending' and datetime.now() > order['expires_at']:
-                        st.session_state.payment_orders[order_id]['status'] = 'expired'
-                        st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
+                    if order['status'] == 'pending':
+                        if st.button(f"✅ 标记为已完成", key=f"confirm_{order_id}"):
+                            st.session_state.payment_orders[order_id]['status'] = 'confirmed'
+                            st.success("订单已标记为完成！")
+                            st.rerun()
                 
                 with col3:
-                    if st.button(f"删除订单", key=f"delete_{order_id}"):
+                    if st.button(f"🗑️ 删除订单", key=f"delete_{order_id}", type="secondary"):
                         del st.session_state.payment_orders[order_id]
-                        st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
+                        st.success("订单已删除！")
+                        st.rerun()
     else:
         st.info("暂无支付订单")
+        st.markdown("💡 **提示**: 前往 '💳 创建支付' 选项卡创建新的支付订单")
 
 with tab3:
     st.header("系统设置")
@@ -297,17 +369,11 @@ with tab3:
             value=30
         )
         
-        auto_refresh = st.checkbox("自动刷新支付状态", value=True)
-        
-        if auto_refresh:
-            refresh_interval = st.slider(
-                "刷新间隔(秒)", 
-                min_value=10, 
-                max_value=300, 
-                value=30
-            )
+        # 移除自动刷新选项，避免性能问题
+        st.info("💡 **提示**: 使用侧边栏的 '🔄 刷新页面' 按钮或订单管理中的检查按钮来更新状态")
     
     if st.button("保存设置"):
+        # 这里可以保存设置到session state或配置文件
         st.success("设置已保存!")
 
 # 页面底部信息
@@ -316,10 +382,6 @@ st.markdown("""
 <div style='text-align: center'>
     <p>Kaspa支付系统 v1.0 | 基于Streamlit构建</p>
     <p>⚠️ 注意：这是一个演示系统，请勿用于生产环境</p>
+    <p>💡 使用侧边栏的刷新按钮来更新页面状态</p>
 </div>
 """, unsafe_allow_html=True)
-
-# 自动刷新功能（如果启用）
-if 'auto_refresh' in locals() and auto_refresh:
-    time.sleep(refresh_interval)
-    st.rerun()  # 修复点1：使用 st.rerun() 替代 st.experimental_rerun()
